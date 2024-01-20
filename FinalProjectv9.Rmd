@@ -1,0 +1,1313 @@
+---
+title: |
+  |
+  | Final Exam
+  | ADMN 872: Predictive Analytics
+author: |
+  | Brad Butella, Phung Lim, and Justin Sirois
+output: html_document
+---
+
+The Data:
+
+- Read your data in R and call it df. For the rest of this document `y` refers to the variable you are predicting.
+
+```{r}
+#Phung
+
+library(gridExtra) 
+library(ggplot2)
+library(ggfortify)
+library(kableExtra)
+library(car)
+library(lattice)
+library(ggvis)
+library(MASS) 
+library(ISLR) 
+library(class)
+library(magrittr)
+library(ggvis)
+library(boot)
+library(leaps)
+library(glmnet)
+library(pls)
+library(readr)
+library(rpart)
+library(rpart.plot)
+library(caret)
+library(Metrics)
+library(ipred)
+library(randomForest)
+library(gbm)
+library(e1071)
+library(dplyr)
+
+df <- read_csv("C:/Users/bbutella/Desktop/Predictive Analytics/Final Project/output/2023.csv")
+
+head(df)
+
+#find top 3 airlines to work with, instead of full data set due to eliminate length
+
+Airlines <- df %>%
+  group_by(AIRLINE_CODE) %>%
+  summarize(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(3)
+
+print(Airlines)
+
+airline_mapping <- data.frame(
+  AIRLINE_CODE = c("WN", "DL", "AA") ,
+  full_name = c("Southwest Airlines", "Delta Air Lines", "American Airlines"))
+        
+df1 <- df %>%
+  left_join(airline_mapping, by = "AIRLINE_CODE") %>%
+  mutate(Full_Name_AIR = coalesce(full_name, as.character(AIRLINE_CODE)))
+
+df_filtered <- df1 %>%
+  filter(AIRLINE_CODE %in% Airlines$AIRLINE_CODE)
+
+# View the filtered data frame
+df2<-df_filtered[,1:34]
+head(df2)
+
+#For our first run at the project, removing cancelled & Diverted flights, as we want to know on time performance of flights that had a complete succession
+df2<-subset(df2, df2$CANCELLED == 0)
+df2<-subset(df2, df2$DIVERTED== 0)
+head(df2)               
+
+```
+
+## Part 1: Exploratory Data Analysis (20 points)
+
+1. Check for existence of NA's (missing data) (Hint: check if the complete.case(df) has the same number of rows and the original df) 
+
+```{r}
+
+#cleaning data
+#complete.cases(df2)
+
+#NA's are known, in the delayed types column, i.e. late due to x or due to y and the amount of time delayed. Will clean the data below
+
+#We have a ton of data, omitting Rows with NAs for cleaning
+df2<- na.omit(df2)
+
+
+```
+
+2. Classify all categorical variables **except the one you are predicting** as factors. Calculate the summary statistics of the whole data set. Based on your results, do you believe your data would benefit from scaling?
+
+
+```{r}
+#Phung
+summary(df2)
+
+#Yes, the data needs to be scaled. There are multiple dimensions in the data, and the scope of analytics will dictate what needs to be spliced and scaled back. We have provided the following scales to surface question pertaining to the data. Below we have Identified the top 3 airlines we want to view, Track trends based on a high level approach of on time performance (OTP %). Then the data is grouped by the date & airline code, for a time series vantage point.
+
+#Chose to use a binary category. Per the definition found online, if the CSR, Computerized Reservation Systems is within 15mins of take off/landing than the flight is on time. For this project we will focus on the Arrival time, Since more factors can effect the overall 
+
+#Binomial Mutated to DF, if ON TIME then 1 else Late = 0
+
+df3<- df2%>%
+  mutate(ontime = ifelse(df2$ARR_DELAY<=15 & df2$DIVERTED == 0 & df2$CANCELLED == 0,1,0))
+
+#Had to clean up the null values, previous report, had if 0 then null.
+df3$DELAY_DUE_CARRIER <- ifelse(is.na(df3$DELAY_DUE_CARRIER), 0, df3$DELAY_DUE_CARRIER)
+df3$DELAY_DUE_WEATHER <- ifelse(is.na(df3$DELAY_DUE_WEATHER), 0, df3$DELAY_DUE_WEATHER)
+df3$DELAY_DUE_NAS<- ifelse(is.na(df3$DELAY_DUE_NAS), 0, df3$DELAY_DUE_NAS)
+df3$DELAY_DUE_SECURITY <- ifelse(is.na(df3$DELAY_DUE_SECURITY), 0, df3$DELAY_DUE_SECURITY)
+df3$DELAY_DUE_LATE_AIRCRAFT<- ifelse(is.na(df3$DELAY_DUE_LATE_AIRCRAFT), 0, df3$DELAY_DUE_LATE_AIRCRAFT)
+df3$AIR_TIME<- ifelse(is.na(df3$AIR_TIME), 0, df3$AIR_TIME)
+df3$TAXI_IN<- ifelse(is.na(df3$TAXI_IN), 0, df3$TAXI_IN)
+df3$TAXI_OUT<- ifelse(is.na(df3$TAXI_OUT), 0,df3$TAXI_OUT )
+df3$DISTANCE<- ifelse(is.na(df3$DISTANCE), 0,df3$DISTANCE )
+
+
+
+#Provided this table to present high level view of on time & Late Data
+Ontime_ct <- df3 %>%
+  group_by(AIRLINE_CODE) %>%
+  summarize(ON_TIME = sum(ontime==1, na.rm=TRUE),
+               LATE = sum(ontime==0, na.rm=TRUE) ) 
+  print(Ontime_ct)
+  
+  #rm outliers in Arr_delay, the root of categorial numeric value for Ontime. starting with a 1 day delay. Time is formatted miltary time. 
+   removeontime<- subset(df3,df3$ontime == 0)
+   
+  
+  
+
+
+```
+3. For the numerical variables, plot boxplots based on values of `y`. Do you see a difference between the boxplots for any of the variables you choose?
+
+```{r}
+
+#Phung: Provide a boxplot for the following variables grouped by Airline Code & by Month, and the summation of Total, (Canceled and Diverted)
+#Remove outliers and provide a boxplot for the following variables. (Delay_due....), Use the summary function for each variable, then subset the df to include anything less than the 3rd quartile. Then plot box plots.**Re-alias the dataframe i.e. do this df1<- df, instead of df<-df. The recursive function here will change the results to follow. 
+
+
+#Outliers removed
+bxplt <- boxplot(
+  removeontime$ARR_DELAY ~ as.factor(removeontime$full_name),
+  data = removeontime,
+  ylab = "When Late (Mins)",
+  xlab = "AIRLINE",
+  outline = FALSE
+)
+
+
+
+
+#With outliers for high level view
+bxpltwout <- boxplot(
+  removeontime$ARR_DELAY ~ as.factor(removeontime$full_name),
+  data = removeontime,
+  ylab = "Late Flights",
+  xlab = "AIRLINE"
+  
+)
+
+#bxplt
+#bxpltwout
+
+#time series lense for trends
+
+# % of Flights not on time per month
+df3$FL_DATE <- as.Date(df3$FL_DATE)
+
+# Create a new variable FL_MONTH to represent the month
+df3$FL_MONTH <- format(df3$FL_DATE, "%Y-%m")
+
+# OTP means on time performance (%)
+OTP <- df3 %>%
+  group_by(FL_MONTH, AIRLINE_CODE) %>%
+  summarize(
+    OnTimeCount = sum(ontime == 1, na.rm = TRUE),
+    TotalFlights = n()
+  ) %>%
+  mutate(OnTimePercent = (OnTimeCount / TotalFlights) * 100)
+
+
+ggplot(OTP, aes(x = FL_MONTH, y = OnTimePercent, group = AIRLINE_CODE, color = AIRLINE_CODE)) +
+  geom_line() +
+  labs(x = "Date", y = "Flights on Time (%)", title = "OTP (%) Aggr by Month") 
+
+#Number of flights
+ggplot(OTP, aes(x = FL_MONTH, y = TotalFlights, group = AIRLINE_CODE, color = AIRLINE_CODE)) +
+  geom_line() +
+  labs(x = "Date", y = "Flights", title = "Total flights (#) Aggr by Month") +
+  theme_minimal()
+
+head(df3)
+df3unscale<- df3[,c("ontime","AIR_TIME", "TAXI_IN", "TAXI_OUT" , "DELAY_DUE_CARRIER", "DELAY_DUE_LATE_AIRCRAFT","DELAY_DUE_NAS","DELAY_DUE_SECURITY","DEP_DELAY","WHEELS_OFF","WHEELS_ON", "full_name")]
+head(df3unscale)
+
+
+#Scaling for Boxplot
+df3maxs<-apply(df3unscale[,1:11],MARGIN = 2,max)
+df3mins<-apply(df3unscale[,1:11],MARGIN=2,min)
+df3dfscale<- as.data.frame(scale(df3unscale[,1:11],df3mins,df3maxs-df3mins))
+
+#Boxplot
+
+
+boxplot(df3dfscale$DEP_DELAY)
+boxplot(df3dfscale$AIR_TIME)
+boxplot(df3dfscale$TAXI_IN)
+boxplot(df3dfscale$TAXI_OUT)
+boxplot(df3dfscale$DELAY_DUE_CARRIER)
+boxplot(df3dfscale$DELAY_DUE_LATE_AIRCRAFT)
+boxplot(df3dfscale$DELAY_DUE_NAS)
+boxplot(df3dfscale$DELAY_DUE_SECURITY)
+boxplot(df3dfscale$WHEELS_OFF)
+boxplot(df3dfscale$WHEELS_ON)
+
+```
+4. For the categorical variables, plot bar charts for the different values of `y`. Do you see a difference between plots for any of the variables you choose?
+
+```{r}
+
+#needs work
+#Phung group by airline code only to get total summations using the variables used above. Essentially use the same code as above but remove the month variable in the group by to get a total. Just group by airline code.
+
+
+late_flights_by_airline <- df3 %>%
+  filter(ontime == 0) %>%
+  group_by(AIRLINE_CODE) %>%
+  summarize(LateFlights = n())
+
+ontime_flights_by_airline <- df3 %>%
+  filter(ontime == 1) %>%
+  group_by(AIRLINE_CODE) %>%
+  summarize(LateFlights = n())
+
+
+ggplot(late_flights_by_airline, aes(x = AIRLINE_CODE, y = LateFlights, fill = AIRLINE_CODE)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Airline Code", y = "Number of Late Flights", title = "Number of Late Flights by Airline") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+
+
+
+
+```
+
+
+**Hint: Use the function `barplot`** You can do so by barplot(variable), or you can try the following code:
+
+newdata <- table(df[,"y"], df[,"variable"]")
+barplot(newdata, main="....", xlab="....", legend = rownames(newdata)) 
+
+5. Scale your **numeric** data using R function `scale()`, and combined these with your non-numeric data.
+```{r}
+#phung, trying to figure out the scale function. My assumption that the data will look weird unless we are using the group by dfs. 
+
+#This has been completed during the SVM portion of the project. As seen, Data was scaled utilizing PCA. Then again using NN at the end of the project. KNN, Logistic, and decision trees are the only unscaled parts of the data. Explain further in presentation, for reasoning.
+
+
+
+```
+6. Test/training separation: Separate your data into 70% training and 30% testing data. Do not forget to set seed. Please use the same separation for the whole assignment, as it is needed to be able to compare the models.
+```{r}
+#Brad
+
+df3$AIRLINE_CODE <- as.factor(df3$AIRLINE_CODE)
+df3$ontime<-as.factor(df3$ontime)
+
+
+df3<- df3[, -which(names(df3) == "FL_YEAR")]
+
+#Logistic Regression did not like the standard dataset, was under the assumption there were too many strings in dataset. Took out time related fields in df to eliminate some strings and added some more numeric values for log reg. to run.
+
+df4<- data.frame(df3$AIRLINE_CODE,df3$AIR_TIME,df3$ontime,df3$TAXI_IN,df3$TAXI_OUT,df3$DELAY_DUE_CARRIER,df3$DELAY_DUE_LATE_AIRCRAFT, df3$DELAY_DUE_NAS,df3$DELAY_DUE_SECURITY)
+
+
+
+head(df4)
+AA<- subset(df4,df4$df3.AIRLINE_CODE == 'AA' )
+AA<- AA[, -which(names(AA) == "df3.AIRLINE_CODE")]
+
+DL<- subset(df4,df4$df3.AIRLINE_CODE == 'DL')
+DL<- DL[, -which(names(DL) == "df3.AIRLINE_CODE")]
+
+WN<- subset(df4,df4$df3.AIRLINE_CODE == 'WN')
+WN<- WN[, -which(names(WN) == "df3.AIRLINE_CODE")]
+
+
+head(AA)
+head(DL)
+
+
+#Could have pursued this in two directions. Create training then subset by airline code, this will provide me a consistent 70% of Training data for each air line. If completed in reverse, the sample training data will be thrown off. Too many observations for logistic Regression to run on, which is the reason why the GLM will be ran 3 times.
+
+set.seed(100)
+indexAA = sample(1:nrow(AA),round(.7*nrow(AA)))
+trainAA = AA[indexAA,]
+testAA = AA[-indexAA,]
+
+set.seed(100)
+indexDL = sample(1:nrow(DL),round(.7*nrow(DL)))
+trainDL = DL[indexDL,]
+testDL = DL[-indexDL,]
+
+set.seed(100)
+indexWN = sample(1:nrow(WN),round(.7*nrow(WN)))
+trainWN = WN[indexWN,]
+testWN = WN[-indexWN,]
+
+#apply(df4,2,function(x) sum(is.na(x)))
+
+
+
+
+
+
+
+```
+
+## Part 2: Logistic Regression (15 points)
+
+1. Develop a classification model where the variable `y` is the dependent variable using the Logistic Regression method, rest of the variables, and your training data set.
+
+```{r}
+#Brad - LOGISTIC REGRESSION
+library(caret)
+valuectAA<-sapply(lapply(trainAA,unique),length)
+valuectDL<-sapply(lapply(trainDL,unique),length)
+valuectWN<-sapply(lapply(trainWN,unique),length)
+
+#Since Airline was subseted, only one value presented, need more than two levels in data. Removing Airline code from df
+
+
+valuectAA
+valuectDL
+valuectWN
+
+
+levels(trainAA$df3.ontime)
+OTPAA<- glm(trainAA$df3.ontime ~ . , family = 'binomial'  ,trainAA)
+OTPDL<- glm(trainDL$df3.ontime ~ . , family = 'binomial'  ,trainDL)
+OTPWN<- glm(trainWN$df3.ontime ~ . , family = 'binomial'  ,trainWN)
+
+
+summary(OTPAA)
+summary(OTPDL)
+summary(OTPWN)
+
+
+
+
+
+```
+
+2. Take out all insignificant variables (at $\alpha=0.1$), and run the logistic model again.
+```{r}
+#Brad
+
+#N/A: Due to size of df, we were not able to run the full orignal set dataset using the logistic regression function. Memory went from 5 GiB to 15 GiB when trying to run log func on trainAA. However we did make some extra modifications to the df, for the model to run. the following variables were removed. (flight date, airport codes, time strings) out of all variables really wanted to analyze original to destination flight patterns. Would have been interesting to predict, specific flight destination, and room of error before takeoff & landing. i.e. from our research, there is less margin of error if a flight took off at jfk going to lax, with 15 delay before take off, is more likely to arrive late to destination. Unfortunately, due to the R capabilities & not being hooked up to a SQL database piping only desired info, this could not occur. If more time permitted will trying aggregate airport codes by concatenating "orign - dest", then aggr values on averages or sums might be better. flight code permutations may still be a bit much for computational purposes. 
+
+
+
+```
+3. Obtain the confusion matrix and compute the **testing error rate** based on the logistic regression classification.
+```{r}
+
+
+predAA<-ifelse(predict(OTPAA, newdata=testAA, type="response")>.5,1,0)
+predDL<-ifelse(predict(OTPDL, newdata=testDL, type="response")>.5,1,0)
+predWN<-ifelse(predict(OTPWN, newdata=testWN, type="response")>.5,1,0)
+
+tableAA<- table(predAA,testAA$df3.ontime)
+tableDL<- table(predDL,testDL$df3.ontime)
+tableWN<- table(predWN,testWN$df3.ontime)
+confAA<- confusionMatrix(tableAA)
+confDL<- confusionMatrix(tableDL)
+confWN<- confusionMatrix(tableWN)
+
+confAA
+confDL
+confWN
+
+
+errorfunc<- function(actual,prediction){
+  1-  mean(actual == prediction)
+  }
+testingerrorAA<-errorfunc(testAA$df3.ontime,predAA)
+testingerrorDL<-errorfunc(testDL$df3.ontime,predDL)
+testingerrorWN<-errorfunc(testWN$df3.ontime,predWN)
+
+testingerrorAA
+testingerrorDL
+testingerrorWN
+
+```
+4. Do you believe logistic regression did a good job here?
+```{r}
+#Brad
+#Each confusion model did fairly well predicting data. With each of the three models having an accuracy in the high 90 percentile, I would presume that this would be a good model for predictions. Additionally the high Kappa rate tells me that this is a good fit for the model. 
+#However to obtain the model, data needed to be trimmed from the dataset which in my opinion would lead to bias in the prediction model.
+#MSE calculation is also close to 0 which is why NA's are present when calculating the MSE. 
+
+
+
+```
+## Part 3: KNN (15 points)
+
+1. Apply a KNN classification to the training data using k=5. Remember to create labels. 
+```{r}
+#Justin/Brad
+
+set.seed(100)
+
+na.omit(AA)
+
+indAA <- sample(2,nrow(AA),replace=T,prob=c(.7,.3))
+AAtrainlabels <- AA[indAA==1, "df3.ontime"]
+AAtestlabels <- AA[indAA==2, "df3.ontime"]
+
+AAtrainKNN<- AA[indAA==1,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+AAtestKNN <- AA[indAA==2,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+
+
+na.omit(DL)
+indDL <- sample(2,nrow(DL),replace=T,prob=c(.7,.3))
+DLtrainlabels <- DL[indDL==1, "df3.ontime"]
+DLtestlabels <- DL[indDL==2, "df3.ontime"]
+
+indWN <- sample(2,nrow(WN),replace=T,prob=c(.7,.3))
+WNtrainlabels <- WN[indWN==1, "df3.ontime"]
+WNtestlabels <- WN[indWN==2, "df3.ontime"]
+
+DLtrainKNN<- DL[indDL==1,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+DLtestKNN <- DL[indDL==2,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+
+WNtrainKNN<- WN[indWN==1,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+WNtestKNN <- WN[indWN==2,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+ 
+AAknn_pred <- knn(train=AAtrainKNN, test=AAtestKNN, cl = AAtrainlabels , k=5)
+summary(AAknn_pred)
+AAtb<-table(AAknn_pred,AAtestlabels)
+
+DLknn_pred <- knn(train=DLtrainKNN, test=DLtestKNN, cl = DLtrainlabels , k=5)
+summary(DLknn_pred)
+DLtb<-table(DLknn_pred,DLtestlabels)
+
+WNknn_pred <- knn(train=WNtrainKNN, test=WNtestKNN, cl = WNtrainlabels , k=5)
+summary(WNknn_pred)
+WNtb<-table(WNknn_pred,WNtestlabels)
+
+
+AA_Running_on_DLknn_pred <- knn(train=DLtrainKNN, test=AAtestKNN, cl = DLtrainlabels , k=5)
+summary(AA_Running_on_DLknn_pred )
+AAonDLtb<-table(AA_Running_on_DLknn_pred ,AAtestlabels)
+
+
+
+
+```
+2.  Obtain the confusion matrix and compute the testing error rate based on the KNN classification.
+```{r}
+#Justin/Brad
+confusionMatrix(AAtb)
+confusionMatrix(DLtb)
+confusionMatrix(WNtb)
+confusionMatrix(AAonDLtb)
+
+
+#Cbind training data for SVM in the next section:
+AAtrainKNN2<- cbind(AAtrainlabels,AAtrainKNN)
+DLtrainKNN2<- cbind(DLtrainlabels,DLtrainKNN)
+WNtrainKNN2<- cbind(WNtrainlabels,WNtrainKNN)
+
+
+#adding predicting variables back on data
+AAtestKNN2<- cbind(AAtestlabels,AAtestKNN)
+dltestKNN2<- cbind(DLtestlabels,DLtestKNN)
+wntestKNN2<- cbind(WNtestlabels,WNtestKNN)
+
+
+aaknnerr<- errorfunc(AAtestKNN2$AAtestlabels,AAknn_pred)
+aaknnerr
+dlknnerr<- errorfunc(dltestKNN2$DLtestlabels,DLknn_pred)
+dlknnerr
+
+wnknnerr<- errorfunc(wntestKNN2$WNtestlabels,WNknn_pred)
+wnknnerr
+```
+3. Do you believe knn classifier did a good job here?
+```{r}
+#Justin/Brad
+#Yes, the KNN has a low error rate with strong fit to the model. However this is expected since the delay variables are direct causational factors, that lead to either an on time or late flight. 
+
+```
+## Part 4: Tree Based Model (15 points)
+  1. Apply one of the following models to your training data: *Classification Tree, Random Forrest, Bagging or Boosting*
+```{r}
+#Justin
+
+
+#AA Classification Tree
+treeAA= rpart(formula=trainAA$df3.ontime~., data=data.frame(trainAA[,1:8]), method = "class", parms=list(split="gini"))
+printcp(treeAA)
+
+rpart.plot(treeAA, roundint = FALSE, main="Classification Tree American Airlines")
+
+ptreeAA<-prune(treeAA, cp= treeAA$cptable[which.min(treeAA$cptable[,"xerror"]),"CP"])
+rpart.plot(ptreeAA, roundint=FALSE, main="Pruned Classification Tree American Airlines")
+
+#DL Classification Tree
+treeDL= rpart(formula=trainDL$df3.ontime~., data=data.frame(trainDL[,1:8]), method = "class", parms=list(split="gini"))
+printcp(treeDL)
+
+rpart.plot(treeDL, roundint = FALSE, main="Classification Tree Delta Airlines")
+
+ptreeDL<-prune(treeDL, cp= treeDL$cptable[which.min(treeDL$cptable[,"xerror"]),"CP"])
+rpart.plot(ptreeDL, roundint=FALSE, main="Pruned Classification Tree Delta Airlines")
+
+#WN Classification Tree
+treeWN= rpart(formula=trainWN$df3.ontime~., data=data.frame(trainWN[,1:8]), method = "class", parms=list(split="gini"))
+printcp(treeWN)
+
+rpart.plot(treeWN, roundint = FALSE, main="Classification Tree Southwest Airlines")
+
+ptreeWN<-prune(treeWN, cp= treeWN$cptable[which.min(treeWN$cptable[,"xerror"]),"CP"])
+rpart.plot(ptreeWN, roundint=FALSE, main="Pruned Classification Tree Southwest Airlines")
+
+
+
+
+
+```
+2. Obtain the confusion matrix and compute the testing error rate based on your chosen tree based model.
+```{r}
+#Justin
+#confusion Matrix AA
+pred.saAA <- predict(ptreeAA, testAA[,1:8], type = "class")
+head(pred.saAA)
+head(testAA[,1:8])
+
+table(pred.saAA,testAA$df3.ontime)
+
+#Testing Error AA
+errorAA <- 1-mean(testAA$df3.ontime==pred.saAA)
+errorAA
+
+#confusion Matrix DL
+pred.saDL <- predict(ptreeDL, testDL[,1:8], type = "class")
+head(pred.saDL)
+head(testDL[,1:8])
+
+table(pred.saDL,testDL$df3.ontime)
+
+#Testing Error DL
+errorDL <- 1-mean(testDL$df3.ontime==pred.saDL)
+errorDL
+
+#confusion Matrix WN
+pred.saWN <- predict(ptreeWN, testWN[,1:8], type = "class")
+head(pred.saWN)
+head(testWN[,1:8])
+
+table(pred.saWN,testWN$df3.ontime)
+
+#Testing Error WN
+errorWN <- 1-mean(testWN$df3.ontime==pred.saWN)
+errorWN
+
+
+table(errorAA, errorDL, errorWN)
+
+```
+3. Do you believe the tree based model did a good job here?
+```{r}
+#We do not believe the classification tree is a good model for this job. The reason is we are concerned that it is too basis and is fitting too perfectly. The testing errors for all 3 airlines are extremely low which could mean the model fits the data too much.
+
+```
+## Part 5: SVM or NN (15 points)
+
+1. Apply one of the following models to your training data: *SVM or neural network*.
+
+```{r}
+
+#PCA for scaling
+AAtrainKNN2$AAtrainlabels<- as.numeric(AAtrainKNN2$AAtrainlabels)
+AAtestKNN2$AAtestlabels<- as.numeric(AAtestKNN2$AAtestlabels)
+
+AApca<- prcomp(AAtrainKNN2[,1:7], scale = TRUE, center = TRUE)
+
+AAtestpca<- prcomp(AAtestKNN2[,1:7], scale = TRUE, center = TRUE)
+
+
+
+AApca
+biplot(AApca)
+
+prvar<- (AApca$sdev)^2
+#proportional variance
+
+y<- prvar/ sum(prvar)
+
+screeone<-plot(prvar,xlab="Principal Componet",
+     ylab= "Proportion of Variance Explained",
+     ylim= c(0,1), type = "b")
+
+screetwo<-plot(y,xlab="Cumulative Principal Componet",
+     ylab= "Proportion of Variance Explained",
+     ylim= c(0,1), type = "b")
+
+pcadf<- AApca_df <- data.frame(PC1 = AApca$x[, 1], PC2 = AApca$x[, 2], PC3 =AApca$x[, 3], PC4 =AApca$x[, 4],PC5 = AApca$x[, 5],PC6 =AApca$x[, 6],PC7 =AApca$x[, 7], AAtrainlabels = AAtrainKNN2$AAtrainlabels)
+
+
+scaledpcasvmAA<- svm(AAtrainlabels~., data=pcadf, type = "C-classification", kernel = "linear", cost=.1, gamma=.5, scale = FALSE)
+
+plot(pcadf$PC1, pcadf$PC2, col = ifelse(pcadf$AAtrainlabels == 1, "red", "blue"), pch = 19, main = "SVM Decision Boundary")
+
+head(AAtestpca)
+
+predscpca<-ifelse(predict(scaledpcasvmAA, AAtestpca$x)>.5,1,0)
+
+
+SVMerrorAA <- mse(AAtestKNN2$AAtestlabels,predscpca)
+SVMerrorAA
+
+
+
+#After hours of processing, Computer timed out after several hours, Found the Kernlab best to work with large datasets; here is the unscaled
+#library(kernlab)
+
+# Create an SVM classifier with a linear kernel using kernlab (DF too large)
+#svmAA <- ksvm(AAtrainlabels ~ ., data = AAtrainKNN2, kernel = "vanilladot")
+#svmDL <- ksvm(DLtrainlabels ~ ., data = DLtrainKNN2, kernel = "vanilladot")
+#svmWN <- ksvm(WNtrainlabels ~ ., data = WNtrainKNN2, kernel = "vanilladot")
+# Make predictions on the test set
+#svmpredAA <- ifelse(predict(svmDL, newdata = dltestKNN2)>.5,1,0)
+#svmpredDL <- ifelse(predict(svmDL, newdata = dltestKNN2)>.5,1,0)
+#svmpredWN <- predict(svmWN, newdata = wntestKNN2)
+
+
+#svmDL
+
+#scaledpcasvmAA
+
+#SVMerrorAA <- mse(AAtestKNN2$AAtestlabels,svmpredAA)
+#SVMerrorAA
+
+#SVMerrorDL <- mse(dltestKNN2$dltestlabels==)
+#SVMerrorDL
+
+#SVMerrorWN <- 1-mean(wntestKNN2$WMtestlabels==svmpredictionsWN)
+#SVMerrorWN
+
+#Training error of .03241 (Unscaled Data using KSVM) Number of Support Vectors 5,703
+
+
+
+
+```
+
+2. Calculate the confusion matrix using the testing data.
+```{r}
+#Brad
+
+#Confusion Matrix for SVM Models
+contabAA <- table(AAtestKNN2$AAtestlabels, predscpca)
+#contabDL <- table(dltestKNN2$DLtestlabels, predpca)
+#contabWN <- table(wntestKNN2$WNtestlabels, svmpredWN)
+
+confusionMatrix(contabAA)
+contabAA
+length(svmpredAA)
+#contabDL
+contabAA
+#confusionMatrix(contabAA)
+confusionMatrix(contabDL)
+#confusionMatrix(contabWN)
+
+```
+3. Do you believe your chosen model did a good job here?
+```{r}
+#Brad
+
+#Difficult to say, SVM do a great job, however it was too computationally expensive to run. Would recommend subsetting into smaller data chunks to run this on either NN or SVM. Error Training rate = .03%.5,704 Support vectors. When scalled the PCA provided the incorrect classifications. Not the best error or accuracy. Log regression has surpased the scalled SVM model. Also very bad fit for testing. Kappa had -.02
+
+
+```
+## Part 6: Conclusion (20 points)
+
+1. Based on the four classification models, which one do you think is the best model to predict `y`? Please consider the following in your response:
+
+    - Accuracy/error rates
+    - Do you think you can improve the model by adding any other information?
+```{r}
+
+# In terms of the four models, there is an element missing, computational processing. This assignment was spent more on running ML functions than debugging. From what was seen below/ what was able to run, I would suggest that it would be the classification Tree. As seen below, The NN ML performs a great job with smaller sets of data, however if these complex algorithems cannot run in a reasonable amount of time, then they are useless. Classification tree makes the most sense, since the data used in this example directly ties into the flight being late, it would be better to use bagging and other tree model techeniques. In addition to that the delay time was around the same intervals +/- twenty 
+
+
+library(tidyr)
+#Brad
+#Logistic Regression
+LRE <- rbind(testingerrorAA, testingerrorDL, testingerrorWN)
+colnames(LRE) = ("Logistic Regression")
+rownames(LRE)[rownames(LRE) == "testingerrorAA"] = "American Airlines"
+rownames(LRE)[rownames(LRE) == "testingerrorDL"] = "Delta Airlines"
+rownames(LRE)[rownames(LRE) == "testingerrorWN"] = "SouthWest Airlines"
+LRE
+
+#KNN
+KNNE <- rbind(aaknnerr, dlknnerr, wnknnerr)
+colnames(KNNE) = ("KNN")
+rownames(KNNE)[rownames(KNNE) == "aaknnerr"] = "American Airlines"
+rownames(KNNE)[rownames(KNNE) == "dlknnerr"] = "Delta Airlines"
+rownames(KNNE)[rownames(KNNE) == "wnknnerr"] = "SouthWest Airlines"
+KNNE
+
+#Classification Tree
+CTE <- rbind(errorAA, errorDL, errorWN)
+colnames(CTE) = ("Classification Tree")
+rownames(CTE)[rownames(CTE) == "errorAA"] = "American Airlines"
+rownames(CTE)[rownames(CTE) == "errorDL"] = "Delta Airlines"
+rownames(CTE)[rownames(CTE) == "errorWN"] = "SouthWest Airlines"
+CTE
+
+#Will run for too long. Have included an example of a scaled NN down below
+#SVM
+#SVME <- rbind(SVMerrorAA, SVMerrorDL, SVMerrorWN)
+#colnames(SVME) = ("SVM")
+#rownames(SVME)[rownames(SVME) == "SVMerrorAA"] = "American Airlines"
+#rownames(SVME)[rownames(SVME) == "SVMerrorDL"] = "Delta Airlines"
+#rownames(SVME)[rownames(SVME) == "SVMerrorWM"] = "SouthWest Airlines"
+#SVME
+```
+  
+  
+2. What are your learning outcomes for this assignment? Please focus on your learning outcomes in terms of predcitive analytics, model interpretations, and R skills.
+```{r}
+#Brad
+#There were a lot of teachable moment in this assignment. There is a fine line between effiecent computing & effective computing power. R is slow, and the need for faster languages is imperative to obtain better results. The other through might be a SQL db could help with handling some of the computation power in memory. Parsing and cleaning the data, might be better handled outside of R than piped in for graphical user interface. 
+
+#ML was also a new concept. There are many ways to slice the data, through it into a ML function and to see how it interacts with a predictive model. One concept that I wanted to get into, and never fully quite grasped, is the interaction piece. If permitted more time, I would have tried to create more functions than the two you see below. My idea, would be allow an end user to create their own testing input. For example, if my Delay_dues_ Acft: 8, Delay_ weather: 30.. etc. Would that trip classify on time. 
+
+#Lastly, I leave you with two Function below; from my previous attempt at it, they both work. In the first function, you can add any Airline code in the function, and it will dump the same outputs as this project. The second function provides you a better subset, the user puts the origin airport and the dest airport code. This function is a bit different. I tried to cover the rest of the ML forumlas covered this semester, including NN. Unfortunately I believe Random Forest has a better outcome. ENJOY! :)
+
+
+```
+
+## Part 7: Presentation (VIDEO) (20 points)
+
+Give a 20 min presentation of your work, make sure everyone on the team speaks. 
+
+```{r}
+
+#Run Through the project again, this time with a different airline. Function input below:
+
+test_any_Airline<- function(AL) {
+   
+  AL<- toString(AL)
+     
+  df_filtered <- df1 %>%
+  filter(AIRLINE_CODE == AL )
+
+df2<-df_filtered[,1:34]
+df2<-subset(df2, df2$CANCELLED == 0)
+df2<-subset(df2, df2$DIVERTED== 0)
+df3<- df2%>%
+  mutate(ontime = ifelse(df2$ARR_DELAY<=15 & df2$DIVERTED == 0 & df2$CANCELLED == 0,1,0))
+df3$DELAY_DUE_CARRIER <- ifelse(is.na(df3$DELAY_DUE_CARRIER), 0, df3$DELAY_DUE_CARRIER)
+df3$DELAY_DUE_WEATHER <- ifelse(is.na(df3$DELAY_DUE_WEATHER), 0, df3$DELAY_DUE_WEATHER)
+df3$DELAY_DUE_NAS<- ifelse(is.na(df3$DELAY_DUE_NAS), 0, df3$DELAY_DUE_NAS)
+df3$DELAY_DUE_SECURITY <- ifelse(is.na(df3$DELAY_DUE_SECURITY), 0, df3$DELAY_DUE_SECURITY)
+df3$DELAY_DUE_LATE_AIRCRAFT<- ifelse(is.na(df3$DELAY_DUE_LATE_AIRCRAFT), 0, df3$DELAY_DUE_LATE_AIRCRAFT)
+df3$AIR_TIME<- ifelse(is.na(df3$AIR_TIME), 0, df3$AIR_TIME)
+df3$TAXI_IN<- ifelse(is.na(df3$TAXI_IN), 0, df3$TAXI_IN)
+df3$TAXI_OUT<- ifelse(is.na(df3$TAXI_OUT), 0,df3$TAXI_OUT )
+df3$DISTANCE<- ifelse(is.na(df3$DISTANCE), 0,df3$DISTANCE )
+
+Ontime_ct <- df3 %>%
+  group_by(AIRLINE_CODE) %>%
+  summarize(ON_TIME = sum(ontime==1, na.rm=TRUE),
+               LATE = sum(ontime==0, na.rm=TRUE) ) 
+  print(Ontime_ct)
+  
+removeontime<- subset(df3,df3$ontime == 0)
+
+
+#Outliers removed
+bxplt <- boxplot(
+  removeontime$ARR_DELAY ~ as.factor(removeontime$AIRLINE_CODE),
+  data = removeontime,
+  ylab = "When Late (Mins)",
+  xlab = "AIRLINE",
+  outline = FALSE
+)
+
+
+
+
+#With outliers for high level view
+bxpltwout <- boxplot(
+  removeontime$ARR_DELAY ~ as.factor(removeontime$AIRLINE_CODE),
+  data = removeontime,
+  ylab = "Late Flights",
+  xlab = "AIRLINE"
+  
+)
+
+#bxplt
+#bxpltwout
+
+#time series lense for trends
+
+# % of Flights not on time per month
+df3$FL_DATE <- as.Date(df3$FL_DATE)
+
+# Create a new variable FL_MONTH to represent the month
+df3$FL_MONTH <- format(df3$FL_DATE, "%Y-%m")
+
+# OTP means on time performance (%)
+OTP <- df3 %>%
+  group_by(FL_MONTH, AIRLINE_CODE) %>%
+  summarize(
+    OnTimeCount = sum(ontime == 1, na.rm = TRUE),
+    TotalFlights = n()
+  ) %>%
+  mutate(OnTimePercent = (OnTimeCount / TotalFlights) * 100)
+
+
+
+ggplot(OTP, aes(x = FL_MONTH, y = OnTimePercent, group = AIRLINE_CODE, color = AIRLINE_CODE)) +
+  geom_line() +
+  labs(x = "Date", y = "Flights on Time (%)", title = "OTP (%) Aggr by Month") 
+
+#Number of flights
+ggplot(OTP, aes(x = FL_MONTH, y = TotalFlights, group = AIRLINE_CODE, color = AIRLINE_CODE)) +
+  geom_line() +
+  labs(x = "Date", y = "Flights", title = "Total flights (#) Aggr by Month") +
+  theme_minimal()
+
+late_flights_by_airline <- df3 %>%
+  filter(ontime == 0) %>%
+  group_by(AIRLINE_CODE) %>%
+  summarize(LateFlights = n())
+
+
+ggplot(late_flights_by_airline, aes(x = AIRLINE_CODE, y = LateFlights, fill = AIRLINE_CODE)) +
+  geom_bar(stat = "identity") +
+  labs(x = "Airline Code", y = "Number of Late Flights", title = "Number of Late Flights by Airline") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+
+df3$AIRLINE_CODE <- as.factor(df3$AIRLINE_CODE)
+df3$ontime<-as.factor(df3$ontime)
+
+
+df3<- df3[, -which(names(df3) == "FL_YEAR")]
+
+#Logistic Regression did not like the standard dataset, was under the assumption there were too many strings in dataset. Took out time related fields in df to eliminate some strings and added some more numeric values for log reg. to run.
+
+df4<- data.frame(df3$AIRLINE_CODE,df3$AIR_TIME,df3$ontime,df3$TAXI_IN,df3$TAXI_OUT,df3$DELAY_DUE_CARRIER,df3$DELAY_DUE_LATE_AIRCRAFT, df3$DELAY_DUE_NAS,df3$DELAY_DUE_SECURITY)
+
+
+
+head(df4)
+AA<- subset(df4,df4$df3.AIRLINE_CODE == AL )
+AA<- AA[, -which(names(AA) == "df3.AIRLINE_CODE")]
+
+
+
+head(AA)
+
+
+
+#Could have pursued this in two directions. Create training then subset by airline code, this will provide me a consistent 70% of Training data for each air line. If completed in reverse, the sample training data will be thrown off. Too many observations for logistic Regression to run on, which is the reason why the GLM will be ran 3 times.
+
+set.seed(100)
+indexAA = sample(1:nrow(AA),round(.7*nrow(AA)))
+trainAA = AA[indexAA,]
+testAA = AA[-indexAA,]
+
+
+library(caret)
+valuectAA<-sapply(lapply(trainAA,unique),length)
+valuectAA
+levels(trainAA$df3.ontime)
+OTPAA<- glm(trainAA$df3.ontime ~ . , family = 'binomial'  ,trainAA)
+summary(OTPAA)
+
+
+predAA<-ifelse(predict(OTPAA, newdata=testAA, type="response")>.5,1,0)
+
+
+tableAA<- table(predAA,testAA$df3.ontime)
+
+confAA<- confusionMatrix(tableAA)
+
+confAA
+
+errorfunc<- function(actual,prediction){
+  1-  mean(actual == prediction)
+  }
+testingerrorAA<-errorfunc(testAA$df3.ontime,predAA)
+
+
+testingerrorAA
+
+set.seed(100)
+
+na.omit(AA)
+
+indAA <- sample(2,nrow(AA),replace=T,prob=c(.7,.3))
+AAtrainlabels <- AA[indAA==1, "df3.ontime"]
+AAtestlabels <- AA[indAA==2, "df3.ontime"]
+
+AAtrainKNN<- AA[indAA==1,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+AAtestKNN <- AA[indAA==2,c("df3.AIR_TIME", "df3.TAXI_IN", "df3.TAXI_OUT" , "df3.DELAY_DUE_CARRIER", "df3.DELAY_DUE_LATE_AIRCRAFT","df3.DELAY_DUE_NAS","df3.DELAY_DUE_SECURITY")]
+
+
+AAknn_pred <- knn(train=AAtrainKNN, test=AAtestKNN, cl = AAtrainlabels , k=5)
+summary(AAknn_pred)
+AAtb<-table(AAknn_pred,AAtestlabels)
+
+
+
+#Justin/Brad
+confusionMatrix(AAtb)
+
+
+#Cbind training data for SVM in the next section:
+AAtrainKNN2<- cbind(AAtrainlabels,AAtrainKNN)
+
+
+
+#adding predicting variables back on data
+AAtestKNN2<- cbind(AAtestlabels,AAtestKNN)
+
+aaknnerr<- errorfunc(AAtestKNN2$AAtestlabels,AAknn_pred)
+aaknnerr
+
+treeAA= rpart(formula=trainAA$df3.ontime~., data=data.frame(trainAA[,1:8]), method = "class", parms=list(split="gini"))
+printcp(treeAA)
+
+rpart.plot(treeAA, roundint = FALSE, main=paste("Pruned Classification Tree: ", AL))
+
+ptreeAA<-prune(treeAA, cp= treeAA$cptable[which.min(treeAA$cptable[,"xerror"]),"CP"])
+rpart.plot(ptreeAA, roundint=FALSE, main=paste("Pruned Classification Tree: ", AL))
+
+
+pred.saAA <- predict(ptreeAA, testAA[,1:8], type = "class")
+head(pred.saAA)
+head(testAA[,1:8])
+
+table(pred.saAA,testAA$df3.ontime)
+
+#Testing Error AA
+errorAA <- 1-mean(testAA$df3.ontime==pred.saAA)
+errorAA
+
+
+#PCA for scaling
+AAtrainKNN2$AAtrainlabels<- as.numeric(AAtrainKNN2$AAtrainlabels)
+sapply(AAtrainKNN2,class)
+AApca<- prcomp(AAtrainKNN2[,1:7], scale = TRUE, center = TRUE)
+
+
+AApca
+biplot(AApca)
+
+prvar<- (AApca$sdev)^2
+#proportional variance
+
+y<- prvar/ sum(prvar)
+
+screeone<-plot(prvar,xlab="Principal Componet",
+     ylab= "Proportion of Variance Explained",
+     ylim= c(0,1), type = "b")
+
+screetwo<-plot(y,xlab="Cumulative Principal Componet",
+     ylab= "Proportion of Variance Explained",
+     ylim= c(0,1), type = "b")
+
+
+#scaledpcasvmAA<- svm(AApca,)
+
+
+
+#After hours of processing, Computer timed out after several hours, Found the Kernlab best to work with large datasets; here is the unscaled
+#library(kernlab)
+
+
+#svmAA <- ksvm(AAtrainlabels ~ ., data = AAtrainKNN2, kernel = "vanilladot")
+
+# Make predictions on the test set
+#svmpredAA <- predict(svmAA, newdata = AAtestKNN2)
+#SVMerrorAA <- 1-mean(AAtestKNN2$AAtestlabels==svmpredAA)
+#SVMerrorAA
+#Confusion Matrix for SVM Models
+#contabAA <- table(AAtestKNN2$AAtestlabels, svmpredAA)
+
+#confusionMatrix(contabAA)
+
+#Logistic Regression
+LRE <- testingerrorAA
+colnames(LRE) = ("Logistic Regression")
+rownames(LRE)[rownames(LRE) == "testingerrorAA"] = paste("Airline Selected: ", AL)
+
+LRE
+
+#KNN
+KNNE <- aaknnerr
+colnames(KNNE) = ("KNN")
+rownames(KNNE)[rownames(KNNE) == "aaknnerr"] = paste("Airline Selected: ", AL)
+
+
+#Classification Tree
+CTE <- rbind(errorAA, errorDL, errorWN)
+colnames(CTE) = ("Classification Tree")
+rownames(CTE)[rownames(CTE) == "errorAA"] = paste("Airline Selected: ", AL)
+
+
+CTE
+
+#SVM
+SVME <- rbind(SVMerrorAA, SVMerrorDL, SVMerrorWN)
+colnames(SVME) = ("SVM")
+rownames(SVME)[rownames(SVME) == "SVMerrorAA"] = paste("Airline Selected: ", AL)
+
+SVME
+  
+}
+
+test_any_Airline("9E")
+
+```
+Flight to Flight
+```{r}
+
+#~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Destination Program ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+MLFlight_tracker<- function(ORG,DEST){
+myflight<- paste(ORG,sep=" - ", DEST)
+user_input<-""
+  
+#to overwrite, data need to branch from orignal data so that the data is not filterd by the time it gets to this point. will add 'r' prefacing clearning data process
+#myflight<- paste("JFK",sep=" - ", "LAX")
+
+
+
+
+rdf<-df
+#For our first run at the project, removing cancelled & Diverted flights, as we want to know on time performance of flights that had a complete succession
+rdf2<-subset(rdf, rdf$CANCELLED == 0)
+rdf2<-subset(rdf, rdf$DIVERTED== 0)
+  
+rdf3<- rdf2%>%
+  mutate(ontime = ifelse(rdf2$ARR_DELAY<=15 & rdf2$DIVERTED == 0 & rdf2$CANCELLED == 0,1,0))
+
+#Had to clean up the null values, previous report, had if 0 then null.
+rdf3$DELAY_DUE_CARRIER <- ifelse(is.na(rdf3$DELAY_DUE_CARRIER), 0, rdf3$DELAY_DUE_CARRIER)
+rdf3$DELAY_DUE_WEATHER <- ifelse(is.na(rdf3$DELAY_DUE_WEATHER), 0, rdf3$DELAY_DUE_WEATHER)
+rdf3$DELAY_DUE_NAS<- ifelse(is.na(rdf3$DELAY_DUE_NAS), 0, rdf3$DELAY_DUE_NAS)
+rdf3$DELAY_DUE_SECURITY <- ifelse(is.na(rdf3$DELAY_DUE_SECURITY), 0, rdf3$DELAY_DUE_SECURITY)
+rdf3$DELAY_DUE_LATE_AIRCRAFT<- ifelse(is.na(rdf3$DELAY_DUE_LATE_AIRCRAFT), 0, rdf3$DELAY_DUE_LATE_AIRCRAFT)
+rdf3$AIR_TIME<- ifelse(is.na(rdf3$AIR_TIME), 0, rdf3$AIR_TIME)
+rdf3$TAXI_IN<- ifelse(is.na(rdf3$TAXI_IN), 0, rdf3$TAXI_IN)
+rdf3$TAXI_OUT<- ifelse(is.na(rdf3$TAXI_OUT), 0,rdf3$TAXI_OUT )
+rdf3$DISTANCE<- ifelse(is.na(rdf3$DISTANCE), 0,rdf3$DISTANCE )
+
+
+#Want to copy the full df3, since it was the last clean df from prior work. Here I want to use fp.
+
+
+#Mutating a concat of org & dest. renaming the df to oned, could rename it as fp to overwrite, but for best practice in troubleshooting, will not overwrite. 
+oned<- mutate(rdf3,flight = paste(rdf3$ORIGIN,sep=" - ", rdf3$DEST))
+
+
+
+head(oned)
+pattern <- oned %>%
+  group_by(flight) %>%
+  summarize(
+    totalflights = n(),
+    ON_TIME = sum(ontime == 1, na.rm = TRUE),
+    LATE = sum(ontime == 0, na.rm = TRUE),
+    OTP= ON_TIME/(ON_TIME+LATE)  ) %>%
+  arrange(desc(totalflights)) 
+
+#myflight<-toString(myflight)
+
+PRESENTUSER<- subset(pattern,pattern$flight==myflight)
+ print(PRESENTUSER)
+ 
+ #Heres a historical graph
+OTPd <- oned %>%
+  group_by(FL_MONTH,  flight) %>%
+  summarize(
+    OnTimeCount = sum(ontime == 1, na.rm = TRUE),
+    TotalFlights = n()
+  ) %>%
+  mutate(OnTimePercent = (OnTimeCount / TotalFlights) * 100) %>%
+  filter(flight %in% myflight)
+
+ 
+graf<- ggplot(OTPd, aes(x = FL_MONTH, y = OnTimePercent, group = flight, color = flight)) +
+  geom_line() +
+  labs(x = "Date", y = "Flights on Time (%)", title = "OTP (%) Aggr by Month") 
+
+
+
+#stopifnot(PRESENTUSER$totalflights <= 10)
+user_input <- readline(cat("Do you want to continue, total flights in sample = ", PRESENTUSER$totalflights, " (y/n): "))
+
+if (tolower(user_input) != "y") {
+  stop("User chose not to continue. Exiting.")
+}
+
+cat("Continuing with the program...")
+graf
+
+x<- data.frame(cbind(oned$flight,oned$AIRLINE_CODE,oned$DEP_DELAY,oned$TAXI_OUT,oned$DELAY_DUE_CARRIER,oned$DELAY_DUE_LATE_AIRCRAFT,oned$DELAY_DUE_WEATHER, oned$DELAY_DUE_SECURITY,oned$DELAY_DUE_NAS,oned$DISTANCE,oned$AIR_TIME,oned$ontime))
+
+colnames(x) <- c("Flight", "Airline_Code", "Dep_Delay", "Taxi_Out", "Carrier_Delay", 
+                 "Late_Aircraft_Delay", "Weather_Delay", "Security_Delay", "NAS_Delay", 
+                 "Distance", "Air_Time", "On_Time")
+
+data.frame(x)
+x<-na.omit(x)
+
+
+SUBx<-subset(x, x$Flight == myflight)
+complete.cases(SUBx)
+SUBx <- SUBx[, -which(names(SUBx) == "Flight")]
+SUBx <- SUBx[, -which(names(SUBx) == "Distance")]
+SUBx <- SUBx[, -which(names(SUBx) == "Airline_Code")]
+#SUBx$Airline_Code <- as.numeric(as.factor(SUBx$Airline_Code))
+SUBx<-as.data.frame(lapply(SUBx, as.numeric))
+#SUBx$On_Time <- as.factor(SUBx$On_Time)
+
+SUBnn <- as.data.frame(lapply(SUBx, as.numeric))
+#SUBx<-as.data.frame(lapply(SUBx, as.factor))
+
+head(SUBx)
+
+#SUBx<-SUBx[, -which(names(SUBx) == "On_Time")]
+
+set.seed(100)
+index = sample(1:nrow(SUBx),round(.7*nrow(SUBx)))
+
+#trainlabels <- SUBx[index==1, "On_Time"]
+#testlabels <- SUBx[index==2, "On_Time"]
+
+trainx<- SUBx[index,]
+testx<- SUBx[-index,]
+
+#trainx<- SUBx[index==1,c("Airline_Code", "Dep_Delay", "Taxi_Out" , "Carrier_Delay", #"Late_Aircraft_Delay","Weather_Delay","Security_Delay","NAS_Delay","Air_Time")]
+#testx <- SUBx[index==2,c("Airline_Code", "Dep_Delay", "Taxi_Out" , "Carrier_Delay", #"Late_Aircraft_Delay","Weather_Delay","Security_Delay","NAS_Delay","Air_Time")]
+
+
+
+length(trainx$On_Time)
+length(testx$On_Time)
+#}
+
+
+
+
+resp<- trainx$On_Time
+predictors<-setdiff(names(trainx), resp)
+unique(trainx$On_Time)
+valuectAA<-sapply(lapply(trainx,unique),length)
+valuectAA
+acclist<- list()
+
+accu<- function(predict,actual){
+  
+  corr<- sum(predict==actual)
+  totpred<- length(actual)
+  acc<- corr/totpred  
+}
+
+
+mselist<-list()
+
+lm_model <- lm(trainx$On_Time~.,data = trainx)
+summary(lm_model)
+lm_pred <- predict(lm_model, newdata = testx)
+lmlab<-ifelse(predict(lm_model, newdata=testx, type="response")>.5,1,0)
+lmtab<- table(testx$On_Time,lmlab)
+lmconfu<-confusionMatrix(lmtab)
+mselist$mlm<- mse(testx$On_Time,lm_pred)
+acclist$mlm<-lmconfu$overall["Accuracy"]
+
+
+
+ # head(trainlabelsY)
+SUBx$On_Time <- as.factor(SUBx$On_Time)
+
+
+lda_model <- lda(resp~ trainx$Dep_Delay+trainx$Carrier_Delay,data = trainx)
+lda_pred <- predict(lda_model, newdata = testx)
+  ldatbl<-table(trainx$On_Time,lda_pred$class) 
+
+conflda<- confusionMatrix(ldatbl)
+                
+acclist$lda<- conflda$overall["Accuracy"]        
+
+
+#Scaling Training Data
+trmaxs<-apply(trainx[,1:9],MARGIN = 2,max)
+trmins<-apply(trainx[,1:9],MARGIN=2,min)
+trdfscale<- as.data.frame(scale(trainx[,1:9],trmins,trmaxs-trmins))
+#Scaling Testing Data
+tsmaxs<-apply(testx[,1:9],MARGIN = 2,max)
+tsmins<-apply(testx[,1:9],MARGIN=2,min)
+tsdfscale<- as.data.frame(scale(testx[,1:9],tsmins,tsmaxs-tsmins))
+
+print("WORKING ON NN, MAY TAKE A FEW MINUTES......")
+
+library(neuralnet) 
+ # Neural Network
+  nn_model <- neuralnet(trdfscale$On_Time~., data = trdfscale, hidden = c(5, 2))
+ 
+  nn_pred <- predict(nn_model, newdata = tsdfscale, type="response")
+  #nnprednum<- as.numeric(nn_pred)-1
+
+  
+    plot(nn_model)
+ prednn<- compute(nn_model,testx)
+prednn$net.result = sapply(prednn$net.result,round,digits=0)
+
+nnlab<-ifelse(predict(nn_model,  tsdfscale, type="raw")>.5,1,0)
+nntab<-table(tsdfscale$On_Time, nnlab)
+nnconf<-confusionMatrix(nntab)
+
+mselist$nn<- mean((tsdfscale$On_Time-prednn$net.result)^2)
+acclist$nn<- nnconf$overall["Accuracy"]
+  
+  # Random Forest
+  rf_model <- randomForest(trainx$On_Time~., data = trainx)
+  rf_pred <- predict(rf_model, newdata = testx)
+  rfpred<-ifelse(predict(rf_model, newdata = testx, type="class")>.5,1,0)
+  tblrf<-table(testx$On_Time,rfpred)
+rfconf<-confusionMatrix(tblrf)  
+mselist$RF<-mse(testx$On_Time,rf_pred)
+acclist$RF<-rfconf$overall["Accuracy"]
+
+acclist$RF<-accuracy(testx$On_Time,rf_pred)
+plot(rf_model)
+  
+  # Bagging
+  bagging_model <- bagging(trainx$On_Time~., data = trainx)
+  bagging_pred <- predict(bagging_model, newdata = testx)
+  
+predlabag<-ifelse(predict(bagging_model, newdata = testx, type="class")>.5,1,0)
+  tblbag<-table(testx$On_Time,predlabag)
+  bagconf<- confusionMatrix(tblbag)
+
+ mselist$bag<-errorfunc(testx$On_Time,bagging_pred)
+ acclist$bag<-bagconf$overall["Accuracy"]
+
+  # Identify the model with the lowest MSE
+  best_modelMSE <- names(mselist)[which.min(unlist(mselist))]
+  bestaccuracy <- names(mselist)[which.max(unlist(acclist))]
+  # Print MSE results
+  print("MSE Results:")
+  print(mselist)
+  print("Accuracy Results:")
+  print(acclist)
+  # Print the best model
+  print(paste("Best Model based on MSE: ", bestaccuracy))
+  print(paste("Best Model based on MSE: ", best_modelMSE))
+
+  head(SUBx)
+  
+  
+
+  }
+
+
+
+
+
+
+
+
+
+
+MLFlight_tracker("LAX","JFK")
+
+
+
+
+
+
+
+
+
+
+
+
+```
