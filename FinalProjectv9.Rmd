@@ -4,7 +4,7 @@ title: |
   | Final Exam
   | ADMN 872: Predictive Analytics
 author: |
-  | Brad Butella, Phung Lim, and Justin Sirois
+  | Brad Butella
 output: html_document
 ---
 
